@@ -1299,16 +1299,16 @@ bool ApplicationV8::prepareV8Instance(size_t i, bool useActions) {
     for (auto& file : files) {
       switch (_startupLoader.loadScript(isolate, localContext, file)) {
         case JSLoader::eSuccess:
-          LOG(TRACE) << "loaded JavaScript file '" << file.c_str() << "'";
+          LOG(TRACE) << "loaded JavaScript file '" << file << "'";
           break;
         case JSLoader::eFailLoad:
-          LOG(FATAL) << "cannot load JavaScript file '" << files[j]
+          LOG(FATAL) << "cannot load JavaScript file '" << file
                      << "'";
           FATAL_ERROR_EXIT();
           break;
         case JSLoader::eFailExecute:
           LOG(FATAL) << "error during execution of JavaScript file '"
-                     << files[j] << "'";
+                     << file << "'";
           FATAL_ERROR_EXIT();
           break;
       }
