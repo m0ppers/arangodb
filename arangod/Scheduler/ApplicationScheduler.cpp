@@ -30,6 +30,7 @@
 
 #include "Basics/Exceptions.h"
 #include "Basics/Logger.h"
+#include "Basics/logging.h"
 #include "Basics/process-utils.h"
 #include "Scheduler/PeriodicTask.h"
 #include "Scheduler/SchedulerLibev.h"
