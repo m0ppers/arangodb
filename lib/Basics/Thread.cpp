@@ -34,6 +34,7 @@
 #include "Basics/ConditionLocker.h"
 #include "Basics/Exceptions.h"
 #include "Basics/Logger.h"
+#include "Basics/logging.h"
 #include "Basics/WorkMonitor.h"
 
 #include <velocypack/Builder.h>

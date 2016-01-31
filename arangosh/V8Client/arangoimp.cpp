@@ -21,7 +21,8 @@
 /// @author Dr. Frank Celler
 ////////////////////////////////////////////////////////////////////////////////
 
-#include "Basics/Common.h"
+#include "ImportHelper.h"
+
 #include <iostream>
 
 #include "ArangoShell/ArangoClient.h"
@@ -30,8 +31,11 @@
 #include "Basics/ProgramOptionsDescription.h"
 #include "Basics/files.h"
 #include "Basics/init.h"
-#include "ImportHelper.h"
+#include "Basics/logging.h"
+#include "Basics/terminal-utils.h"
+#include "Basics/tri-strings.h"
 #include "Rest/Endpoint.h"
+#include "Rest/HttpResponse.h"
 #include "Rest/InitializeRest.h"
 #include "SimpleHttpClient/GeneralClientConnection.h"
 #include "SimpleHttpClient/SimpleHttpClient.h"

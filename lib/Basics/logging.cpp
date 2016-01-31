@@ -831,37 +831,6 @@ static void CloseLogging() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief gets the log level
-////////////////////////////////////////////////////////////////////////////////
-
-char const* TRI_LogLevelLogging() {
-  return Logger::translateLogLevel(Logger::logLevel());
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief sets the log level
-////////////////////////////////////////////////////////////////////////////////
-
-void TRI_SetLogLevelLogging(char const* level) {
-  if (TRI_CaseEqualString(level, "fatal")) {
-    Logger::setLevel(LogLevel::FATAL);
-  } else if (TRI_CaseEqualString(level, "error")) {
-    Logger::setLevel(LogLevel::ERROR);
-  } else if (TRI_CaseEqualString(level, "warning")) {
-    Logger::setLevel(LogLevel::WARNING);
-  } else if (TRI_CaseEqualString(level, "info")) {
-    Logger::setLevel(LogLevel::INFO);
-  } else if (TRI_CaseEqualString(level, "debug")) {
-    Logger::setLevel(LogLevel::DEBUG);
-  } else if (TRI_CaseEqualString(level, "trace")) {
-    Logger::setLevel(LogLevel::TRACE);
-  } else {
-    Logger::setLevel(LogLevel::INFO);
-    LOG(ERROR) << "strange log level '" << level << "'. using log level 'info'";
-  }
-}
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief sets the log severity
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -887,6 +856,8 @@ void TRI_SetLogSeverityLogging(char const* severities) {
 ////////////////////////////////////////////////////////////////////////////////
 
 void TRI_SetPrefixLogging(char const* prefix) {
+  Logger::setOutputPrefix(prefix);
+
   char* outputPrefix = TRI_DuplicateString(TRI_UNKNOWN_MEM_ZONE, prefix);
 
   if (outputPrefix == nullptr) {
@@ -905,6 +876,7 @@ void TRI_SetPrefixLogging(char const* prefix) {
 ////////////////////////////////////////////////////////////////////////////////
 
 void TRI_SetThreadIdentifierLogging(bool show) {
+  Logger::setShowThreadIdentifier(show);
   ShowThreadIdentifier = show ? 1 : 0;
 }
 
@@ -912,13 +884,19 @@ void TRI_SetThreadIdentifierLogging(bool show) {
 /// @brief use local time?
 ////////////////////////////////////////////////////////////////////////////////
 
-void TRI_SetUseLocalTimeLogging(bool value) { UseLocalTime = value ? 1 : 0; }
+void TRI_SetUseLocalTimeLogging(bool value) {
+  Logger::setUseLocalTime(value);
+  UseLocalTime = value ? 1 : 0;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief sets the line number visibility
 ////////////////////////////////////////////////////////////////////////////////
 
-void TRI_SetLineNumberLogging(bool show) { ShowLineNumber = show ? 1 : 0; }
+void TRI_SetLineNumberLogging(bool show) {
+  Logger::setShowLineNumber(show);
+  ShowLineNumber = show ? 1 : 0;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief logs a new message

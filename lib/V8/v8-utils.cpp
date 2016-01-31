@@ -1722,10 +1722,12 @@ static void JS_LogLevel(v8::FunctionCallbackInfo<v8::Value> const& args) {
   if (1 <= args.Length()) {
     TRI_Utf8ValueNFC str(TRI_UNKNOWN_MEM_ZONE, args[0]);
 
-    TRI_SetLogLevelLogging(*str);
+    Logger::setLogLevel(*str);
   }
 
-  TRI_V8_RETURN_STRING(TRI_LogLevelLogging());
+  auto level = Logger::translateLogLevel(Logger::logLevel());
+
+  TRI_V8_RETURN_STRING(level.c_str());
   TRI_V8_TRY_CATCH_END
 }
 
