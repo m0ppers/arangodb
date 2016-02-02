@@ -326,7 +326,8 @@ class LoggerStream {
 
  public:
   LoggerStream()
-      : _level(LogLevel::DEFAULT),
+      : _topicId(MAX_LOG_TOPICS),
+        _level(LogLevel::DEFAULT),
         _line(0),
         _file(nullptr),
         _function(nullptr) {}
