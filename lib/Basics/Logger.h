@@ -73,8 +73,8 @@ namespace arangodb {
 enum class LogLevel {
   DEFAULT = 0,
   FATAL = 1,
-  ERROR = 2,
-  WARNING = 3,
+  ERR = 2,
+  WARN = 3,
   INFO = 4,
   DEBUG = 5,
   TRACE = 6
@@ -95,17 +95,17 @@ class LogTopic {
 
   LogTopic(std::string const& name, LogLevel level);
 
-  LogTopic(LogTopic const& that) noexcept : _topicId(that._topicId) {
+  LogTopic(LogTopic const& that) noexcept : _id(that._id), _name(that._name) {
     _level.store(that._level, std::memory_order_relaxed);
   }
 
-  LogTopic(LogTopic&& that) noexcept : _topicId(that._topicId) {
+  LogTopic(LogTopic&& that) noexcept : _id(that._id), _name(that._name) {
     _level.store(that._level, std::memory_order_relaxed);
   }
 
  public:
-  size_t id() { return _topicId; }
-
+  size_t id() const { return _id; }
+  std::string const& name() const { return _name; }
   LogLevel level() const { return _level.load(std::memory_order_relaxed); }
 
   void setLogLevel(LogLevel level) {
@@ -113,7 +113,8 @@ class LogTopic {
   }
 
  private:
-  size_t _topicId;
+  size_t _id;
+  std::string _name;
   std::atomic<LogLevel> _level;
 };
 
@@ -338,8 +339,9 @@ class LoggerStream {
     return *this;
   }
 
-  LoggerStream& operator<<(LogTopic topics) {
-    _topicId = topics.id();
+  LoggerStream& operator<<(LogTopic topic) {
+    _topicId = topic.id();
+    _out << "{" + topic.name() << "} ";
     return *this;
   }
 

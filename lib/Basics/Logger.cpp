@@ -83,8 +83,8 @@ static std::atomic<bool> LoggingActive(false);
 /// Note: they need to be created as static variables in Logger
 ////////////////////////////////////////////////////////////////////////////////
 
-static std::map<uint16_t, LogTopic*> LOG_TOPIC_IDS;
-static std::map<std::string, LogTopic*> LOG_TOPIC_NAMES;
+static Mutex LogTopicNamesLock;
+static std::map<std::string, LogTopic*> LogTopicNames;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief message container
@@ -145,10 +145,10 @@ static std::map<size_t, std::vector<std::unique_ptr<LogAppender>>> Appenders;
 ////////////////////////////////////////////////////////////////////////////////
 
 static void WriteStderr(LogLevel level, std::string const& msg) {
-  if (level == LogLevel::FATAL || level == LogLevel::ERROR) {
+  if (level == LogLevel::FATAL || level == LogLevel::ERR) {
     fprintf(stderr, TRI_SHELL_COLOR_RED "%s" TRI_SHELL_COLOR_RESET "\n",
             msg.c_str());
-  } else if (level == LogLevel::WARNING) {
+  } else if (level == LogLevel::WARN) {
     fprintf(stderr, TRI_SHELL_COLOR_YELLOW "%s" TRI_SHELL_COLOR_RESET "\n",
             msg.c_str());
   } else {
@@ -341,8 +341,6 @@ void LogAppenderFile::writeLogFile(int fd, char const* buffer, ssize_t len) {
 
 static void OutputMessage(LogLevel level, size_t topicId,
                           std::string const& message, size_t offset) {
-  bool shown = false;
-
   MUTEX_LOCKER(guard, AppendersLock);
 
   auto output = [&level, &message, &offset](size_t n) -> bool {
@@ -364,6 +362,8 @@ static void OutputMessage(LogLevel level, size_t topicId,
     return shown;
   };
 
+  bool shown = false;
+
   // try to find a specific topic
   if (topicId < MAX_LOG_TOPICS) {
     shown = output(topicId);
@@ -371,7 +371,11 @@ static void OutputMessage(LogLevel level, size_t topicId,
 
   // otherwise use the general topic
   if (!shown) {
-    output(MAX_LOG_TOPICS);
+    shown = output(MAX_LOG_TOPICS);
+  }
+
+  if (!shown) {
+    WriteStderr(level, message);
   }
 }
 
@@ -470,8 +474,8 @@ static void QueueMessage(char const* function, char const* file, long int line,
 
   // now either queue or output the message
   if (ThreadedLogging.load(std::memory_order_relaxed)) {
-    auto msg = std::make_unique<LogMessage>(level, topicId, std::move(out.str()),
-                                            offset);
+    auto msg = std::make_unique<LogMessage>(level, topicId,
+                                            std::move(out.str()), offset);
 
     try {
       MessageQueue.push(msg.get());
@@ -528,14 +532,12 @@ LogTopic::LogTopic(std::string const& name)
     : LogTopic(name, LogLevel::DEFAULT) {}
 
 LogTopic::LogTopic(std::string const& name, LogLevel level)
-    : _topicId(NEXT_TOPIC_ID.fetch_add(1, std::memory_order_seq_cst)),
+    : _id(NEXT_TOPIC_ID.fetch_add(1, std::memory_order_seq_cst)),
+      _name(name),
       _level(level) {
   try {
-    static Mutex topicsLock;
-
-    MUTEX_LOCKER(guard, topicsLock);
-    LOG_TOPIC_IDS[_topicId] = this;
-    LOG_TOPIC_NAMES[name] = this;
+    MUTEX_LOCKER(guard, LogTopicNamesLock);
+    LogTopicNames[name] = this;
   } catch (...) {
   }
 }
@@ -599,18 +601,20 @@ void Logger::addAppender(std::string const& definition, bool fatal2stderr,
       output = v[1];
     }
   } else {
-    LOG(ERROR) << "strange output definition '" << definition << "' ignored";
+    LOG(ERR) << "strange output definition '" << definition << "' ignored";
     return;
   }
 
   LogTopic* topic = nullptr;
 
   if (!topicName.empty()) {
-    auto it = LOG_TOPIC_NAMES.find(topicName);
+    MUTEX_LOCKER(guard, LogTopicNamesLock);
 
-    if (it == LOG_TOPIC_NAMES.end()) {
-      LOG(ERROR) << "strange topic '" << topicName
-                 << "', ignoring whole defintion";
+    auto it = LogTopicNames.find(topicName);
+
+    if (it == LogTopicNames.end()) {
+      LOG(ERR) << "strange topic '" << topicName
+               << "', ignoring whole defintion";
       return;
     }
 
@@ -628,7 +632,7 @@ void Logger::addAppender(std::string const& definition, bool fatal2stderr,
 
     appender.reset(new LogAppenderFile(filename, f2s, contentFilter));
   } else {
-    LOG(ERROR) << "unknown output '" << output << "'";
+    LOG(ERR) << "unknown output '" << output << "'";
     return;
   }
 
@@ -662,8 +666,8 @@ void Logger::setLogLevel(std::string const& levelName) {
 
   if (v.empty() || v.size() > 2) {
     Logger::setLogLevel(LogLevel::INFO);
-    LOG(ERROR) << "strange log level '" << levelName
-               << "', using log level 'info'";
+    LOG(ERR) << "strange log level '" << levelName
+             << "', using log level 'info'";
     return;
   }
 
@@ -678,9 +682,9 @@ void Logger::setLogLevel(std::string const& levelName) {
   if (l == "fatal") {
     level = LogLevel::FATAL;
   } else if (l == "error") {
-    level = LogLevel::ERROR;
+    level = LogLevel::ERR;
   } else if (l == "warning") {
-    level = LogLevel::WARNING;
+    level = LogLevel::WARN;
   } else if (l == "info") {
     level = LogLevel::INFO;
   } else if (l == "debug") {
@@ -690,10 +694,10 @@ void Logger::setLogLevel(std::string const& levelName) {
   } else {
     if (isGeneral) {
       Logger::setLogLevel(LogLevel::INFO);
-      LOG(ERROR) << "strange log level '" << levelName
-                 << "', using log level 'info'";
+      LOG(ERR) << "strange log level '" << levelName
+               << "', using log level 'info'";
     } else {
-      LOG(ERROR) << "strange log level '" << levelName << "'";
+      LOG(ERR) << "strange log level '" << levelName << "'";
     }
 
     return;
@@ -702,11 +706,13 @@ void Logger::setLogLevel(std::string const& levelName) {
   if (isGeneral) {
     Logger::setLogLevel(level);
   } else {
-    auto const& name = v[0];
-    auto it = LOG_TOPIC_NAMES.find(name);
+    MUTEX_LOCKER(guard, LogTopicNamesLock);
 
-    if (it == LOG_TOPIC_NAMES.end()) {
-      LOG(ERROR) << "strange topic '" << name << "'";
+    auto const& name = v[0];
+    auto it = LogTopicNames.find(name);
+
+    if (it == LogTopicNames.end()) {
+      LOG(ERR) << "strange topic '" << name << "'";
       return;
     }
 
@@ -780,8 +786,8 @@ void Logger::setUseLocalTime(bool show) {
 std::string const& Logger::translateLogLevel(LogLevel level) {
   static std::string DEFAULT = "DEFAULT";
   static std::string FATAL = "FATAL";
-  static std::string ERROR = "ERROR";
-  static std::string WARNING = "WARNING";
+  static std::string ERR = "ERROR";
+  static std::string WARN = "WARNING";
   static std::string INFO = "INFO";
   static std::string DEBUG = "DEBUG";
   static std::string TRACE = "TRACE";
@@ -792,10 +798,10 @@ std::string const& Logger::translateLogLevel(LogLevel level) {
       return DEFAULT;
     case LogLevel::FATAL:
       return FATAL;
-    case LogLevel::ERROR:
-      return ERROR;
-    case LogLevel::WARNING:
-      return WARNING;
+    case LogLevel::ERR:
+      return ERR;
+    case LogLevel::WARN:
+      return WARN;
     case LogLevel::INFO:
       return INFO;
     case LogLevel::DEBUG:

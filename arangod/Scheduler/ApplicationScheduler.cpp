@@ -70,7 +70,7 @@ class ControlCTask : public SignalTask {
     int result = SetConsoleCtrlHandler((PHANDLER_ROUTINE)CtrlHandler, true);
 
     if (result == 0) {
-      LOG(WARNING) << "unable to install control-c handler";
+      LOG(WARN) << "unable to install control-c handler";
     }
   }
 
@@ -103,7 +103,7 @@ class ControlCTask : public SignalTask {
       LOG(INFO) << "control-c received, beginning shut down sequence";
       _server->beginShutdown();
     } else {
-      LOG(ERROR) << "control-c received (again!), terminating";
+      LOG(ERR) << "control-c received (again!), terminating";
       _exit(1);
       // TRI_EXIT_FUNCTION(EXIT_FAILURE,0);
     }
@@ -260,7 +260,7 @@ bool CtrlHandler(DWORD eventType) {
   }  // end of switch statement
 
   if (shutdown == false) {
-    LOG(ERROR) << "Invalid CTRL HANDLER event received - ignoring event";
+    LOG(ERR) << "Invalid CTRL HANDLER event received - ignoring event";
     return true;
   }
 
