@@ -27,11 +27,10 @@
 
 #include "Basics/Common.h"
 
-#include <bitset>
 #include <iosfwd>
 #include <sstream>
 
-bool TRI_ShutdownLogging(bool);
+bool TRI_ShutdownLogging(bool);  // TODO(fc) remove
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief maximal number of log topics
@@ -92,17 +91,15 @@ class LogTopic {
   LogTopic& operator=(LogTopic const&) = delete;
 
  public:
-  LogTopic(std::string const& name);
+  explicit LogTopic(std::string const& name);
 
   LogTopic(std::string const& name, LogLevel level);
 
-  LogTopic(LogTopic const& that) noexcept : _topicId(that._topicId),
-                                            _topics(that._topics) {
+  LogTopic(LogTopic const& that) noexcept : _topicId(that._topicId) {
     _level.store(that._level, std::memory_order_relaxed);
   }
 
-  LogTopic(LogTopic&& that) noexcept : _topicId(that._topicId),
-                                       _topics(std::move(that._topics)) {
+  LogTopic(LogTopic&& that) noexcept : _topicId(that._topicId) {
     _level.store(that._level, std::memory_order_relaxed);
   }
 
@@ -115,13 +112,8 @@ class LogTopic {
     _level.store(level, std::memory_order_relaxed);
   }
 
-  std::bitset<MAX_LOG_TOPICS> const& bits() const { return _topics; }
-
-  LogTopic operator|(LogTopic const&) const;
-
  private:
   size_t _topicId;
-  std::bitset<MAX_LOG_TOPICS> _topics;
   std::atomic<LogLevel> _level;
 };
 
@@ -347,7 +339,7 @@ class LoggerStream {
   }
 
   LoggerStream& operator<<(LogTopic topics) {
-    _topics = topics.bits();
+    _topicId = topics.id();
     return *this;
   }
 
@@ -376,7 +368,7 @@ class LoggerStream {
 
  private:
   std::stringstream _out;
-  std::bitset<MAX_LOG_TOPICS> _topics;
+  size_t _topicId;
   LogLevel _level;
   long int _line;
   char const* _file;

@@ -94,15 +94,15 @@ struct LogMessage {
   LogMessage(LogMessage const&) = delete;
   LogMessage& operator=(LogMessage const&) = delete;
 
-  LogMessage(LogLevel level, std::bitset<MAX_LOG_TOPICS> topics,
-             std::string&& message, size_t offset)
+  LogMessage(LogLevel level, size_t topicId, std::string&& message,
+             size_t offset)
       : _level(level),
-        _topics(topics),
+        _topicId(topicId),
         _message(std::move(message)),
         _offset(offset) {}
 
   LogLevel _level;
-  std::bitset<MAX_LOG_TOPICS> _topics;
+  size_t _topicId;
   std::string const _message;
   size_t _offset;
 };
@@ -339,34 +339,15 @@ void LogAppenderFile::writeLogFile(int fd, char const* buffer, ssize_t len) {
 /// @brief OutputMessage
 ////////////////////////////////////////////////////////////////////////////////
 
-static void OutputMessage(LogLevel level, std::bitset<MAX_LOG_TOPICS> topics,
+static void OutputMessage(LogLevel level, size_t topicId,
                           std::string const& message, size_t offset) {
   bool shown = false;
 
-  if (topics.any()) {
-    MUTEX_LOCKER(guard, AppendersLock);
+  MUTEX_LOCKER(guard, AppendersLock);
 
-    for (size_t j = 0; j < MAX_LOG_TOPICS; ++j) {
-      auto const& it = Appenders.find(j);
-
-      if (it != Appenders.end()) {
-        auto const& appenders = it->second;
-
-        for (auto const& appender : appenders) {
-          if (appender->checkContent(message)) {
-            appender->logMessage(level, message, offset);
-          }
-
-          shown = true;
-        }
-      }
-    }
-  }
-
-  if (!shown) {
-    MUTEX_LOCKER(guard, AppendersLock);
-
-    auto const& it = Appenders.find(MAX_LOG_TOPICS);
+  auto output = [&level, &message, &offset](size_t n) -> bool {
+    auto const& it = Appenders.find(n);
+    bool shown = false;
 
     if (it != Appenders.end()) {
       auto const& appenders = it->second;
@@ -375,8 +356,22 @@ static void OutputMessage(LogLevel level, std::bitset<MAX_LOG_TOPICS> topics,
         if (appender->checkContent(message)) {
           appender->logMessage(level, message, offset);
         }
+
+        shown = true;
       }
     }
+
+    return shown;
+  };
+
+  // try to find a specific topic
+  if (topicId < MAX_LOG_TOPICS) {
+    shown = output(topicId);
+  }
+
+  // otherwise use the general topic
+  if (!shown) {
+    output(MAX_LOG_TOPICS);
   }
 }
 
@@ -391,7 +386,7 @@ static boost::lockfree::queue<LogMessage*> MessageQueue(0);
 ////////////////////////////////////////////////////////////////////////////////
 
 static void QueueMessage(char const* function, char const* file, long int line,
-                         LogLevel level, std::bitset<MAX_LOG_TOPICS> topics,
+                         LogLevel level, size_t topicId,
                          std::string const& message) {
 #ifdef _WIN32
   if (level == LogLevel::FATAL || level == LogLevel::ERROR) {
@@ -475,17 +470,17 @@ static void QueueMessage(char const* function, char const* file, long int line,
 
   // now either queue or output the message
   if (ThreadedLogging.load(std::memory_order_relaxed)) {
-    auto msg = std::make_unique<LogMessage>(level, topics, std::move(out.str()),
+    auto msg = std::make_unique<LogMessage>(level, topicId, std::move(out.str()),
                                             offset);
 
     try {
       MessageQueue.push(msg.get());
       msg.release();
     } catch (...) {
-      OutputMessage(level, topics, out.str(), offset);
+      OutputMessage(level, topicId, out.str(), offset);
     }
   } else {
-    OutputMessage(level, topics, out.str(), offset);
+    OutputMessage(level, topicId, out.str(), offset);
   }
 }
 
@@ -507,7 +502,7 @@ void LogThread::run() {
   while (LoggingActive.load()) {
     while (MessageQueue.pop(msg)) {
       try {
-        OutputMessage(msg->_level, msg->_topics, msg->_message, msg->_offset);
+        OutputMessage(msg->_level, msg->_topicId, msg->_message, msg->_offset);
       } catch (...) {
       }
 
@@ -535,8 +530,6 @@ LogTopic::LogTopic(std::string const& name)
 LogTopic::LogTopic(std::string const& name, LogLevel level)
     : _topicId(NEXT_TOPIC_ID.fetch_add(1, std::memory_order_seq_cst)),
       _level(level) {
-  _topics.set(_topicId);
-
   try {
     static Mutex topicsLock;
 
@@ -547,28 +540,13 @@ LogTopic::LogTopic(std::string const& name, LogLevel level)
   }
 }
 
-LogTopic LogTopic::operator|(LogTopic const& that) const {
-  LogTopic result = *this;
-
-  if (result._level < that._level) {
-    result._topicId = MAX_LOG_TOPICS;
-    result._topics |= that._topics;
-
-    if (result._level < that._level) {
-      result._level.store(that._level, std::memory_order_relaxed);
-    }
-  }
-
-  return result;
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief LogStream
 ////////////////////////////////////////////////////////////////////////////////
 
 LoggerStream::~LoggerStream() {
   try {
-    QueueMessage(_function, _file, _line, _level, _topics, _out.str());
+    QueueMessage(_function, _file, _line, _level, _topicId, _out.str());
   } catch (...) {
     std::cerr << "failed to log: " << _out.str() << std::endl;
   }
@@ -581,7 +559,7 @@ LoggerStream::~LoggerStream() {
 LogTopic Logger::COLLECTOR("collector");
 LogTopic Logger::COMPACTOR("compactor");
 LogTopic Logger::PERFORMANCE("performance",
-                             LogLevel::FATAL);          // suppress by default
+                             LogLevel::FATAL);  // suppress by default
 LogTopic Logger::QUERIES("queries", LogLevel::INFO);
 LogTopic Logger::REQUESTS("request", LogLevel::FATAL);  // suppress by default
 
