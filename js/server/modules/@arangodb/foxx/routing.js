@@ -145,11 +145,6 @@ exports.routeApp = function (service, throwOnErrors) {
   let error = null;
   if (service.legacy) {
     error = routeLegacyService(service, throwOnErrors);
-  } else {
-    service.routes = {
-      name: `foxx("${service.mount}")`,
-      routes: []
-    };
   }
 
   if (service.manifest.files) {
