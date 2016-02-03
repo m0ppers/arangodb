@@ -438,8 +438,8 @@ void LogAppenderSyslog::closeLog() {
   MUTEX_LOCKER(mutexLocker, _lock);
 
   if (_opened) {
-    ::closelog();
     _opened = false;
+    ::closelog();
   }
 }
 
@@ -450,6 +450,34 @@ std::string LogAppenderSyslog::details() {
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
+/// @brief RingBuffer
+////////////////////////////////////////////////////////////////////////////////
+
+#define RING_BUFFER_SIZE (10240)
+
+static Mutex RingBufferLock;
+static uint64_t RingBufferId = 1;
+static LogBuffer RingBuffer[RING_BUFFER_SIZE];
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief stores a message in a ring buffer
+///
+/// We ignore any race conditions here.
+////////////////////////////////////////////////////////////////////////////////
+
+static void StoreMessage(LogLevel level, std::string const& message) {
+  MUTEX_LOCKER(guard, RingBufferLock);
+
+  uint64_t n = RingBufferId++;
+  LogBuffer* ptr = &RingBuffer[n % RING_BUFFER_SIZE];
+
+  ptr->_id = n;
+  ptr->_level = level;
+  ptr->_timestamp = time(0);
+  TRI_CopyString(ptr->_message, message.c_str(), sizeof(ptr->_message) - 1);
+}
+
+////////////////////////////////////////////////////////////////////////////////
 /// @brief OutputMessage
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -457,6 +485,12 @@ static void OutputMessage(LogLevel level, size_t topicId,
                           std::string const& message, size_t offset) {
   MUTEX_LOCKER(guard, AppendersLock);
 
+  // store message for frontend
+  if (!message.empty()) {
+    StoreMessage(level, message);
+  }
+
+  // output to appender
   auto output = [&level, &message, &offset](size_t n) -> bool {
     auto const& it = Appenders.find(n);
     bool shown = false;
@@ -581,6 +615,7 @@ static void QueueMessage(char const* function, char const* file, long int line,
   // generate the complete message
   size_t offset = out.str().size();
   out << message;
+  std::string const& m = out.str();
 
   // now either queue or output the message
   if (ThreadedLogging.load(std::memory_order_relaxed)) {
@@ -591,10 +626,10 @@ static void QueueMessage(char const* function, char const* file, long int line,
       MessageQueue.push(msg.get());
       msg.release();
     } catch (...) {
-      OutputMessage(level, topicId, out.str(), offset);
+      OutputMessage(level, topicId, m, offset);
     }
   } else {
-    OutputMessage(level, topicId, out.str(), offset);
+    OutputMessage(level, topicId, m, offset);
   }
 }
 
@@ -979,6 +1014,53 @@ LoggerStream& LoggerStream::operator<<(Logger::DURATION duration) {
       << duration._duration;
   _out << tmp.str();
   return *this;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief returns the last log entries
+////////////////////////////////////////////////////////////////////////////////
+
+std::vector<LogBuffer> Logger::bufferedEntries(LogLevel level, uint64_t start,
+                                               bool upToLevel) {
+  std::vector<LogBuffer> result;
+
+  {
+    MUTEX_LOCKER(guard, RingBufferLock);
+
+    size_t s = 0;
+    size_t e;
+
+    if (RingBufferId >= RING_BUFFER_SIZE) {
+      e = RingBufferId % RING_BUFFER_SIZE;
+      s = (e + 1) % RING_BUFFER_SIZE;
+    } else {
+      e = RingBufferId;
+    }
+
+    for (size_t i = s; i != e;) {
+      LogBuffer& p = RingBuffer[i];
+
+      if (p._id >= start) {
+        if (upToLevel) {
+          if ((int)p._level <= (int)level) {
+            result.emplace_back(p);
+          }
+        } else {
+          if (p._level == level) {
+            result.emplace_back(p);
+          }
+        }
+      }
+
+      ++i;
+
+      if (i >= RING_BUFFER_SIZE) {
+        i = 0;
+      }
+    }
+  }
+
+  return result;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
