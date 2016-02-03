@@ -27,6 +27,14 @@
 #include <iostream>
 #include <iomanip>
 
+#ifdef TRI_ENABLE_SYSLOG
+// we need to define SYSLOG_NAMES for linux to get a list of names
+#define SYSLOG_NAMES
+#define prioritynames TRI_prioritynames
+#define facilitynames TRI_facilitynames
+#include <syslog.h>
+#endif
+
 #include <boost/lockfree/queue.hpp>
 
 #include "Basics/ConditionLocker.h"
@@ -159,7 +167,7 @@ class LogAppenderFile : public LogAppender {
  public:
   LogAppenderFile(std::string const& filename, bool fatal2stderr,
                   std::string const& filter);
-  ~LogAppenderFile();
+  ~LogAppenderFile() { closeLog(); };
 
   void logMessage(LogLevel, std::string const& message,
                   size_t offset) override final;
@@ -209,8 +217,6 @@ LogAppenderFile::LogAppenderFile(std::string const& filename, bool fatal2stderr,
     }
   }
 }
-
-LogAppenderFile::~LogAppenderFile() { closeLog(); }
 
 void LogAppenderFile::logMessage(LogLevel level, std::string const& message,
                                  size_t offset) {
@@ -333,6 +339,115 @@ void LogAppenderFile::writeLogFile(int fd, char const* buffer, ssize_t len) {
     len -= n;
   }
 }
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief LogAppenderSyslog
+////////////////////////////////////////////////////////////////////////////////
+
+#ifdef TRI_ENABLE_SYSLOG
+
+class LogAppenderSyslog : public LogAppender {
+ public:
+  LogAppenderSyslog(std::string const& facility, std::string const& name,
+                    std::string const& filter);
+  ~LogAppenderSyslog() { closeLog(); };
+
+  void logMessage(LogLevel, std::string const& message,
+                  size_t offset) override final;
+
+  void reopenLog() override final;
+  void closeLog() override final;
+
+  std::string details() override final;
+
+ private:
+  arangodb::Mutex _lock;
+  bool _opened;
+};
+
+LogAppenderSyslog::LogAppenderSyslog(std::string const& facility,
+                                     std::string const& name,
+                                     std::string const& filter)
+    : LogAppender(filter), _opened(false) {
+  // no logging
+  std::string sysname = name.empty() ? "[arangod]" : name;
+
+  // find facility
+  int value = LOG_LOCAL0;
+
+  if ('0' <= facility[0] && facility[0] <= '9') {
+    value = StringUtils::int32(facility);
+  } else {
+    CODE* ptr = reinterpret_cast<CODE*>(TRI_facilitynames);
+
+    while (ptr->c_name != 0) {
+      if (strcmp(ptr->c_name, facility.c_str()) == 0) {
+        value = ptr->c_val;
+        break;
+      }
+
+      ++ptr;
+    }
+  }
+
+  // and open logging, openlog does not have a return value...
+  {
+    MUTEX_LOCKER(guard, _lock);
+    ::openlog(sysname.c_str(), LOG_CONS | LOG_PID, value);
+    _opened = true;
+  }
+}
+
+void LogAppenderSyslog::logMessage(LogLevel level, std::string const& message,
+                                   size_t offset) {
+  int priority = LOG_ERR;
+
+  switch (level) {
+    case LogLevel::FATAL:
+      priority = LOG_CRIT;
+      break;
+    case LogLevel::ERR:
+      priority = LOG_ERR;
+      break;
+    case LogLevel::WARN:
+      priority = LOG_WARNING;
+      break;
+    case LogLevel::DEFAULT:
+    case LogLevel::INFO:
+      priority = LOG_NOTICE;
+      break;
+    case LogLevel::DEBUG:
+      priority = LOG_INFO;
+      break;
+    case LogLevel::TRACE:
+      priority = LOG_DEBUG;
+      break;
+  }
+
+  {
+    MUTEX_LOCKER(mutexLocker, _lock);
+    if (_opened) {
+      ::syslog(priority, "%s", message.c_str() + offset);
+    }
+  }
+}
+
+void LogAppenderSyslog::reopenLog() {}
+
+void LogAppenderSyslog::closeLog() {
+  MUTEX_LOCKER(mutexLocker, _lock);
+
+  if (_opened) {
+    ::closelog();
+    _opened = false;
+  }
+}
+
+std::string LogAppenderSyslog::details() {
+  return "More error details may be provided in the syslog";
+}
+
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief OutputMessage
@@ -627,6 +742,22 @@ void Logger::addAppender(std::string const& definition, bool fatal2stderr,
     auto filename = output.substr(7);
 
     appender.reset(new LogAppenderFile(filename, f2s, contentFilter));
+#ifdef TRI_ENABLE_SYSLOG
+  } else if (StringUtils::isPrefix(output, "syslog://")) {
+    auto s = StringUtils::split(output.substr(9), '/');
+
+    if (s.size() < 1 || s.size() > 2) {
+      LOG(ERR) << "unknown syslog definition '" << output << "', expecting "
+               << "'syslog://facility/identifier'";
+      return;
+    }
+
+    if (s.size() == 1) {
+      appender.reset(new LogAppenderSyslog(s[0], "", contentFilter));
+    } else {
+      appender.reset(new LogAppenderSyslog(s[0], s[1], contentFilter));
+    }
+#endif
   } else {
     LOG(ERR) << "unknown output '" << output << "'";
     return;
@@ -834,8 +965,9 @@ std::ostream& operator<<(std::ostream& stream, LogLevel level) {
 
 LoggerStream& LoggerStream::operator<<(Logger::RANGE range) {
   std::ostringstream tmp;
-  tmp << range.baseAddress << " - " 
-      << static_cast<void const*>(static_cast<char const*>(range.baseAddress) + range.size) 
+  tmp << range.baseAddress << " - "
+      << static_cast<void const*>(static_cast<char const*>(range.baseAddress) +
+                                  range.size)
       << " (" << range.size << " bytes)";
   _out << tmp.str();
   return *this;
