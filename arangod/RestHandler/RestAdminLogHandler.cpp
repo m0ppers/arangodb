@@ -103,12 +103,12 @@ HttpHandler::status_t RestAdminLogHandler::execute() {
   }
 
   // check the offset
-  uint64_t offset = 0;
+  int64_t offset = 0;
 
   s = _request->value("offset", found);
 
   if (found) {
-    offset = StringUtils::uint64(s);
+    offset = StringUtils::int64(s);
   }
 
   // check the size
@@ -165,7 +165,9 @@ HttpHandler::status_t RestAdminLogHandler::execute() {
   try {
     result.add("totalAmount", VPackValue(length));
 
-    if (offset >= length) {
+    if (offset < 0) {
+      offset = 0;
+    } else if (offset >= length) {
       length = 0;
       offset = 0;
     } else if (offset > 0) {

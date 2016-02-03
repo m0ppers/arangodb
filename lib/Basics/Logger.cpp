@@ -456,7 +456,7 @@ std::string LogAppenderSyslog::details() {
 #define RING_BUFFER_SIZE (10240)
 
 static Mutex RingBufferLock;
-static uint64_t RingBufferId = 1;
+static uint64_t RingBufferId = 0;
 static LogBuffer RingBuffer[RING_BUFFER_SIZE];
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -465,7 +465,8 @@ static LogBuffer RingBuffer[RING_BUFFER_SIZE];
 /// We ignore any race conditions here.
 ////////////////////////////////////////////////////////////////////////////////
 
-static void StoreMessage(LogLevel level, std::string const& message) {
+static void StoreMessage(LogLevel level, std::string const& message,
+                         size_t offset) {
   MUTEX_LOCKER(guard, RingBufferLock);
 
   uint64_t n = RingBufferId++;
@@ -474,7 +475,8 @@ static void StoreMessage(LogLevel level, std::string const& message) {
   ptr->_id = n;
   ptr->_level = level;
   ptr->_timestamp = time(0);
-  TRI_CopyString(ptr->_message, message.c_str(), sizeof(ptr->_message) - 1);
+  TRI_CopyString(ptr->_message, message.c_str() + offset,
+                 sizeof(ptr->_message) - 1);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -486,8 +488,8 @@ static void OutputMessage(LogLevel level, size_t topicId,
   MUTEX_LOCKER(guard, AppendersLock);
 
   // store message for frontend
-  if (!message.empty()) {
-    StoreMessage(level, message);
+  if (message.size() > offset) {
+    StoreMessage(level, message, offset);
   }
 
   // output to appender
@@ -1024,39 +1026,36 @@ std::vector<LogBuffer> Logger::bufferedEntries(LogLevel level, uint64_t start,
                                                bool upToLevel) {
   std::vector<LogBuffer> result;
 
-  {
-    MUTEX_LOCKER(guard, RingBufferLock);
+  MUTEX_LOCKER(guard, RingBufferLock);
 
-    size_t s = 0;
-    size_t e;
+  size_t s = 0;
+  size_t e;
 
-    if (RingBufferId >= RING_BUFFER_SIZE) {
-      e = RingBufferId % RING_BUFFER_SIZE;
-      s = (e + 1) % RING_BUFFER_SIZE;
-    } else {
-      e = RingBufferId;
-    }
+  if (RingBufferId >= RING_BUFFER_SIZE) {
+    s = e = (RingBufferId + 1) % RING_BUFFER_SIZE;
+  } else {
+    e = RingBufferId;
+  }
 
-    for (size_t i = s; i != e;) {
-      LogBuffer& p = RingBuffer[i];
+  for (size_t i = s; i != e;) {
+    LogBuffer& p = RingBuffer[i];
 
-      if (p._id >= start) {
-        if (upToLevel) {
-          if ((int)p._level <= (int)level) {
-            result.emplace_back(p);
-          }
-        } else {
-          if (p._level == level) {
-            result.emplace_back(p);
-          }
+    if (p._id >= start) {
+      if (upToLevel) {
+        if ((int)p._level <= (int)level) {
+          result.emplace_back(p);
+        }
+      } else {
+        if (p._level == level) {
+          result.emplace_back(p);
         }
       }
+    }
 
-      ++i;
+    ++i;
 
-      if (i >= RING_BUFFER_SIZE) {
-        i = 0;
-      }
+    if (i >= RING_BUFFER_SIZE) {
+      i = 0;
     }
   }
 
