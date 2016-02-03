@@ -259,6 +259,7 @@ class Logger {
 
   static LogTopic COLLECTOR;
   static LogTopic COMPACTOR;
+  static LogTopic MMAP;
   static LogTopic PERFORMANCE;
   static LogTopic QUERIES;
   static LogTopic REQUESTS;
@@ -273,6 +274,16 @@ class Logger {
         : _duration(duration), _precision(precision){};
     double _duration;
     int _precision;
+  };
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief range
+  //////////////////////////////////////////////////////////////////////////////
+
+  struct RANGE {
+    RANGE(void const* baseAddress, size_t size) : baseAddress(baseAddress), size(size){};
+    void const* baseAddress;
+    size_t size;
   };
 
   //////////////////////////////////////////////////////////////////////////////
@@ -447,6 +458,8 @@ class LoggerStream {
     _out << "{" + topic.name() << "} ";
     return *this;
   }
+
+  LoggerStream& operator<<(Logger::RANGE range);
 
   LoggerStream& operator<<(Logger::DURATION duration);
 

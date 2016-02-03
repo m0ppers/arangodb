@@ -555,6 +555,7 @@ LoggerStream::~LoggerStream() {
 
 LogTopic Logger::COLLECTOR("collector");
 LogTopic Logger::COMPACTOR("compactor");
+LogTopic Logger::MMAP("mmap");
 LogTopic Logger::PERFORMANCE("performance",
                              LogLevel::FATAL);  // suppress by default
 LogTopic Logger::QUERIES("queries", LogLevel::INFO);
@@ -811,6 +812,15 @@ std::string const& Logger::translateLogLevel(LogLevel level) {
 std::ostream& operator<<(std::ostream& stream, LogLevel level) {
   stream << Logger::translateLogLevel(level);
   return stream;
+}
+
+LoggerStream& LoggerStream::operator<<(Logger::RANGE range) {
+  std::ostringstream tmp;
+  tmp << range.baseAddress << " - " 
+      << static_cast<void const*>(static_cast<char const*>(range.baseAddress) + range.size) 
+      << " (" << range.size << " bytes)";
+  _out << tmp.str();
+  return *this;
 }
 
 LoggerStream& LoggerStream::operator<<(Logger::DURATION duration) {
