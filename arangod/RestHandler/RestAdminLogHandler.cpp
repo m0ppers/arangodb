@@ -22,12 +22,13 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "RestAdminLogHandler.h"
-#include "Basics/logging.h"
-#include "Basics/StringUtils.h"
-#include "Rest/HttpRequest.h"
 
 #include <velocypack/Builder.h>
 #include <velocypack/velocypack-aliases.h>
+
+#include "Basics/Logger.h"
+#include "Basics/StringUtils.h"
+#include "Rest/HttpRequest.h"
 
 using namespace arangodb;
 using namespace arangodb::basics;
@@ -37,23 +38,27 @@ using namespace arangodb::rest;
 /// @brief sort ascending
 ////////////////////////////////////////////////////////////////////////////////
 
+#if 0
 static bool LidCompareAsc(void const* l, void const* r) {
   TRI_log_buffer_t const* left = (TRI_log_buffer_t const*)l;
   TRI_log_buffer_t const* right = (TRI_log_buffer_t const*)r;
 
   return left->_lid < right->_lid;
 }
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief sort descending
 ////////////////////////////////////////////////////////////////////////////////
 
+#if 0
 static bool LidCompareDesc(void const* l, void const* r) {
   TRI_log_buffer_t const* left = (TRI_log_buffer_t const*)l;
   TRI_log_buffer_t const* right = (TRI_log_buffer_t const*)r;
 
   return right->_lid < left->_lid;
 }
+#endif
 
 RestAdminLogHandler::RestAdminLogHandler(rest::HttpRequest* request)
     : RestBaseHandler(request) {}
@@ -65,6 +70,7 @@ bool RestAdminLogHandler::isDirect() const { return true; }
 ////////////////////////////////////////////////////////////////////////////////
 
 HttpHandler::status_t RestAdminLogHandler::execute() {
+#if 0
   // "/log" can only be called for the _system database
   if (_request->databaseName() != "_system") {
     generateError(HttpResponse::FORBIDDEN,
@@ -289,4 +295,5 @@ HttpHandler::status_t RestAdminLogHandler::execute() {
   }
 
   return status_t(HANDLER_DONE);
+#endif
 }

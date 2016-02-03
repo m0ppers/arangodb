@@ -24,17 +24,16 @@
 
 #include "Logger.h"
 
+#include <iostream>
 #include <iomanip>
-#include <boost/lockfree/queue.hpp>
 
-#include <iostream>  // TODO remove
+#include <boost/lockfree/queue.hpp>
 
 #include "Basics/ConditionLocker.h"
 #include "Basics/MutexLocker.h"
 #include "Basics/StringUtils.h"
 #include "Basics/Thread.h"
 #include "Basics/files.h"
-#include "Basics/logging.h"
 #include "Basics/shell-colors.h"
 #include "Basics/tri-strings.h"
 
@@ -459,10 +458,6 @@ static void QueueMessage(char const* function, char const* file, long int line,
   // check if we must display the line number
   bool sln = ShowLineNumber.load(std::memory_order_relaxed);
 
-  if (level == LogLevel::DEBUG || level == LogLevel::TRACE) {
-    sln = true;
-  }
-
   // append the file and line
   if (sln) {
     out << "[" << file << ":" << line << "] ";
@@ -563,7 +558,7 @@ LogTopic Logger::COMPACTOR("compactor");
 LogTopic Logger::PERFORMANCE("performance",
                              LogLevel::FATAL);  // suppress by default
 LogTopic Logger::QUERIES("queries", LogLevel::INFO);
-LogTopic Logger::REQUESTS("request", LogLevel::FATAL);  // suppress by default
+LogTopic Logger::REQUESTS("requests", LogLevel::FATAL);  // suppress by default
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief current log level

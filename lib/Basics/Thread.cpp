@@ -34,7 +34,6 @@
 #include "Basics/ConditionLocker.h"
 #include "Basics/Exceptions.h"
 #include "Basics/Logger.h"
-#include "Basics/logging.h"
 #include "Basics/WorkMonitor.h"
 
 #include <velocypack/Builder.h>
@@ -344,17 +343,17 @@ void Thread::runMe() {
     run();
   } catch (Exception const& ex) {
     LOG(ERR) << "exception caught in thread '" << _name.c_str() << "': " << ex.what();
-    TRI_FlushLogging();
+    Logger::flush();
     throw;
   } catch (std::exception const& ex) {
     LOG(ERR) << "exception caught in thread '" << _name.c_str() << "': " << ex.what();
-    TRI_FlushLogging();
+    Logger::flush();
     throw;
   } catch (...) {
     _running = false;
     if (!isSilent()) {
       LOG(ERR) << "exception caught in thread '" << _name.c_str() << "'";
-      TRI_FlushLogging();
+      Logger::flush();
     }
     throw;
   }

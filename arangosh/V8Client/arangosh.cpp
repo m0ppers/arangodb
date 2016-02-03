@@ -38,7 +38,6 @@
 #include "Basics/Utf8Helper.h"
 #include "Basics/files.h"
 #include "Basics/init.h"
-#include "Basics/logging.h"
 #include "Basics/messages.h"
 #include "Basics/shell-colors.h"
 #include "Basics/terminal-utils.h"

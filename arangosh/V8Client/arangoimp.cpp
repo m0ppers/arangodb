@@ -31,7 +31,6 @@
 #include "Basics/ProgramOptionsDescription.h"
 #include "Basics/files.h"
 #include "Basics/init.h"
-#include "Basics/logging.h"
 #include "Basics/terminal-utils.h"
 #include "Basics/tri-strings.h"
 #include "Rest/Endpoint.h"
@@ -262,7 +261,7 @@ int main(int argc, char* argv[]) {
   TRIAGENS_C_INITIALIZE(argc, argv);
   TRIAGENS_REST_INITIALIZE(argc, argv);
 
-  TRI_InitializeLogging(false);
+  Logger::initialize(false);
 
   BaseClient.setEndpointString(Endpoint::getDefaultEndpoint());
 

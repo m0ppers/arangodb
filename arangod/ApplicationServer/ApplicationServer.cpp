@@ -21,17 +21,14 @@
 /// @author Dr. Frank Celler
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifdef _WIN32
-#include "Basics/win-utils.h"
-#endif
-
 #include "ApplicationServer.h"
+
+#include <iostream>
 
 #ifdef TRI_HAVE_POSIX_PWD_GRP
 #include <pwd.h>
 #include <grp.h>
 #endif
-#include <iostream>
 
 #include "ApplicationServer/ApplicationFeature.h"
 #include "Basics/ConditionLocker.h"
@@ -39,7 +36,6 @@
 #include "Basics/files.h"
 #include "Basics/FileUtils.h"
 #include "Basics/Logger.h"
-#include "Basics/logging.h"
 #include "Basics/RandomGenerator.h"
 #include "Basics/StringUtils.h"
 #include "Basics/tri-strings.h"
@@ -88,7 +84,6 @@ ApplicationServer::ApplicationServer(std::string const& name,
       _numericGid(0),
       _logApplicationName("arangod"),
       _logFacility(""),
-      _logOutput(),
       _logFile("+"),
       _logTty("+"),
       _logRequestsFile(""),
@@ -150,8 +145,8 @@ std::string const& ApplicationServer::getName() const { return _name; }
 
 void ApplicationServer::setupLogging(bool threaded, bool daemon,
                                      bool backgrounded) {
-  TRI_ShutdownLogging(false);
-  TRI_InitializeLogging(threaded);
+  Logger::shutdown(false);
+  Logger::initialize(threaded);
 
   std::string severity("human");
 
@@ -171,18 +166,10 @@ void ApplicationServer::setupLogging(bool threaded, bool daemon,
     severity += ",performance";
   }
 
-  if (!_logRequestsFile.empty()) {
-    // add this so the user does not need to think about it
-    severity += ",usage";
-  }
-
-  TRI_SetUseLocalTimeLogging(_logLocalTime);
-  TRI_SetLineNumberLogging(_logLineNumber);
-
-  Logger::setLogLevel(_logLevel);
-  TRI_SetLogSeverityLogging(severity.c_str());
-  TRI_SetPrefixLogging(_logPrefix.c_str());
-  TRI_SetThreadIdentifierLogging(_logThreadId);
+  Logger::setUseLocalTime(_logLocalTime);
+  Logger::setShowLineNumber(_logLineNumber);
+  Logger::setOutputPrefix(_logPrefix);
+  Logger::setShowThreadIdentifier(_logThreadId);
 
   char const* contentFilter = nullptr;
 
@@ -190,6 +177,81 @@ void ApplicationServer::setupLogging(bool threaded, bool daemon,
     contentFilter = _logContentFilter.c_str();
   }
 
+  std::vector<std::string> levels;
+  std::vector<std::string> outputs;
+
+  // map deprecated option "log.requests-files" to "log.output"
+  if (!_logRequestsFile.empty()) {
+    std::string const& filename = _logRequestsFile;
+    std::string definition;
+
+    if (filename == "+" || filename == "-") {
+      definition = filename;
+    } else if (daemon) {
+      definition = "file://" + filename + ".daemon";
+    } else {
+      definition = "file://" + filename;
+    }
+
+    levels.push_back("requests=info");
+    outputs.push_back("requests=" + definition);
+  }
+
+  // map "log.file" to "log.output"
+  if (!_logFile.empty()) {
+    std::string const& filename = _logFile;
+    std::string definition;
+
+    if (filename == "+" || filename == "-") {
+      definition = filename;
+    } else if (daemon) {
+      definition = "file://" + filename + ".daemon";
+    } else {
+      definition = "file://" + filename;
+    }
+
+    outputs.push_back(definition);
+  }
+
+  // additional log file in case of tty
+  bool ttyLogger = false;
+
+  if (!backgrounded && isatty(STDIN_FILENO) != 0 && !_logTty.empty()) {
+    bool ttyOut = (_logTty == "+" || _logTty == "-");
+
+    if (!ttyOut) {
+      LOG(ERR) << "'log.tty' must either be '+' or '-', ignoring value '"
+               << _logTty << "'";
+    } else {
+      bool regularOut = false;
+
+      for (auto definition : _logOutput) {
+        regularOut = regularOut || definition == "+" || definition == "-";
+      }
+
+      for (auto definition : outputs) {
+        regularOut = regularOut || definition == "+" || definition == "-";
+      }
+
+      if (!regularOut) {
+        outputs.push_back(_logTty);
+        ttyLogger = true;
+      }
+    }
+  }
+
+  // create all output definitions
+  levels.insert(levels.end(), _logLevel.begin(), _logLevel.end());
+  outputs.insert(outputs.end(), _logOutput.begin(), _logOutput.end());
+
+  Logger::setLogLevel(levels);
+
+  for (auto definition : outputs) {
+    Logger::addAppender(definition, !ttyLogger, _logContentFilter);
+  }
+
+// TODO(FC) fixme
+#if 0
 #ifdef TRI_ENABLE_SYSLOG
   if (!_logFacility.empty()) {
     TRI_CreateLogAppenderSyslog(_logApplicationName.c_str(),
@@ -197,77 +259,7 @@ void ApplicationServer::setupLogging(bool threaded, bool daemon,
                                 TRI_LOG_SEVERITY_UNKNOWN, false);
   }
 #endif
-
-  // requests log (must come before the regular logs because it will consume the
-  // messages)
-  if (!_logRequestsFile.empty()) {
-    std::string filename = _logRequestsFile;
-
-    if (daemon && filename != "+" && filename != "-") {
-      filename = filename + ".daemon";
-    }
-
-    // this appender consumes all usage log messages, so they are not propagated
-    // to any others
-    int res = TRI_CreateLogAppenderFile(filename.c_str(), nullptr,
-                                        TRI_LOG_SEVERITY_USAGE, true, false);
-
-    // the user specified a requests log file to use but it could not be
-    // created. bail out
-    if (res != TRI_ERROR_NO_ERROR) {
-      LOG(FATAL) << "failed to create requests logfile '" << filename.c_str()
-                 << "'. Please check the path and permissions.";
-      FATAL_ERROR_EXIT();
-    }
-  }
-
-  // additional log file in case of tty
-  bool ttyLogger = false;
-
-  if (!backgrounded && isatty(STDIN_FILENO) != 0 && !_logTty.empty()) {
-    bool regularOut = (_logFile == "+" || _logFile == "-");
-    bool ttyOut = (_logTty == "+" || _logTty == "-");
-
-    if (!regularOut || !ttyOut) {
-      int res =
-          TRI_CreateLogAppenderFile(_logTty.c_str(), contentFilter,
-                                    TRI_LOG_SEVERITY_UNKNOWN, false, true);
-
-      if (res == TRI_ERROR_NO_ERROR) {
-        ttyLogger = true;
-      }
-    }
-  }
-
-  // regular log file
-  if (!_logFile.empty()) {
-    std::string filename = _logFile;
-
-    if (daemon && filename != "+" && filename != "-") {
-      filename = filename + ".daemon";
-    }
-
-    int res =
-        TRI_CreateLogAppenderFile(filename.c_str(), contentFilter,
-                                  TRI_LOG_SEVERITY_UNKNOWN, false, !ttyLogger);
-
-    for (auto definition : _logOutput) {
-      Logger::addAppender(definition, !ttyLogger, _logContentFilter);
-    }
-
-    // the user specified a log file to use but it could not be created. bail
-    // out
-    if (res != TRI_ERROR_NO_ERROR) {
-      LOG(FATAL) << "failed to create logfile '" << filename.c_str()
-                 << "'. Please check the path and permissions.";
-      FATAL_ERROR_EXIT();
-    }
-
-    if (daemon && _logFile != "+" && _logFile != "-") {
-      LOG(INFO) << "using logfiles: supervisor process: '" << filename.c_str()
-                << "', child process: '" << _logFile.c_str() << "'";
-    }
-  }
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -783,7 +775,6 @@ void ApplicationServer::setupOptions(
 
   options["Logging Options:help-default:help-log"]
     ("log.file", &_logFile, "log to file")
-    ("log.requests-file", &_logRequestsFile, "log requests to file")
     ("log.level,l", &_logLevel, "log level")
     ("log.output,o", &_logOutput, "log output")
   ;
@@ -803,6 +794,7 @@ void ApplicationServer::setupOptions(
 
   options["Hidden Options"]
     ("log", &_logLevel, "log level")
+    ("log.requests-file", &_logRequestsFile, "log requests to file (deprecated)")
     ("log.syslog", &DeprecatedParameter, "use syslog facility (deprecated)")
     ("log.hostname", &DeprecatedParameter, "host name for syslog")
     ("log.severity", &DeprecatedParameter, "log severities")
@@ -887,7 +879,8 @@ bool ApplicationServer::readConfigurationFile() {
     // but for some reason can not be parsed. Best to report an error.
 
     if (!ok) {
-      LOG(ERR) << "cannot parse config file '" << _configFile.c_str() << "': " << _options.lastError().c_str();
+      LOG(ERR) << "cannot parse config file '" << _configFile.c_str()
+               << "': " << _options.lastError().c_str();
     }
 
     return ok;
@@ -929,7 +922,8 @@ bool ApplicationServer::readConfigurationFile() {
         // but for some reason can not be parsed. Best to report an error.
 
         if (!ok) {
-          LOG(ERR) << "cannot parse config file '" << homeDir.c_str() << "': " << _options.lastError().c_str();
+          LOG(ERR) << "cannot parse config file '" << homeDir.c_str()
+                   << "': " << _options.lastError().c_str();
         }
 
         return ok;
@@ -972,7 +966,8 @@ bool ApplicationServer::readConfigurationFile() {
         // exists
         // but for some reason can not be parsed. Best to report an error.
         if (!ok) {
-          LOG(ERR) << "cannot parse config file '" << localSysDir.c_str() << "': " << _options.lastError().c_str();
+          LOG(ERR) << "cannot parse config file '" << localSysDir.c_str()
+                   << "': " << _options.lastError().c_str();
           return ok;
         }
       } else {
@@ -990,7 +985,8 @@ bool ApplicationServer::readConfigurationFile() {
         // exists
         // but for some reason can not be parsed. Best to report an error.
         if (!ok) {
-          LOG(ERR) << "cannot parse config file '" << sysDir.c_str() << "': " << _options.lastError().c_str();
+          LOG(ERR) << "cannot parse config file '" << sysDir.c_str()
+                   << "': " << _options.lastError().c_str();
         }
 
         return ok;

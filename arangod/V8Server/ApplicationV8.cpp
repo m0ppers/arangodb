@@ -36,7 +36,6 @@
 #include "Basics/WorkMonitor.h"
 #include "Basics/WriteLocker.h"
 #include "Basics/Logger.h"
-#include "Basics/logging.h"
 #include "Basics/tri-strings.h"
 #include "Cluster/ServerState.h"
 #include "Cluster/v8-cluster.h"
@@ -1261,16 +1260,6 @@ bool ApplicationV8::prepareV8Instance(size_t i, bool useActions) {
     {
       v8::HandleScope scope(isolate);
 
-      char const* logfile = TRI_GetFilenameLogging();
-      if (logfile != nullptr) {
-        TRI_AddGlobalVariableVocbase(isolate, localContext,
-                                     TRI_V8_ASCII_STRING("LOGFILE_PATH"),
-                                     TRI_V8_STRING(logfile));
-      } else {
-        TRI_AddGlobalVariableVocbase(isolate, localContext,
-                                     TRI_V8_ASCII_STRING("LOGFILE_PATH"),
-                                     v8::Null(isolate));
-      }
       TRI_AddGlobalVariableVocbase(isolate, localContext,
                                    TRI_V8_ASCII_STRING("APP_PATH"),
                                    TRI_V8_STD_STRING(_appPath));
