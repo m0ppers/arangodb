@@ -645,6 +645,22 @@ void Logger::addAppender(std::string const& definition, bool fatal2stderr,
 LogLevel Logger::logLevel() { return _level.load(std::memory_order_relaxed); }
 
 ////////////////////////////////////////////////////////////////////////////////
+/// @brief determines the global log level
+////////////////////////////////////////////////////////////////////////////////
+
+std::vector<std::pair<std::string, LogLevel>> Logger::logLevelTopics() {
+  MUTEX_LOCKER(guard, LogTopicNamesLock);
+
+  std::vector<std::pair<std::string, LogLevel>> levels;
+
+  for (auto topic : LogTopicNames) {
+    levels.emplace_back(make_pair(topic.first, topic.second->level()));
+  }
+
+  return levels;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 /// @brief sets the global log level
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -687,6 +703,8 @@ void Logger::setLogLevel(std::string const& levelName) {
     level = LogLevel::DEBUG;
   } else if (l == "trace") {
     level = LogLevel::TRACE;
+  } else if (!isGeneral && (l.empty() || l == "default")) {
+    level = LogLevel::DEFAULT;
   } else {
     if (isGeneral) {
       Logger::setLogLevel(LogLevel::INFO);
